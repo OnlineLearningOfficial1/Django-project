@@ -1,0 +1,71 @@
+pipeline {
+    
+    agent any
+    environment{
+        SONAR_HOME = tool "Sonar"
+    }
+
+    
+    stages {
+        
+        stage("Code"){
+            steps{
+                git url: "https://github.com/OnlineLearningOfficial1/Django-project.git" , branch: "main"
+                echo "Code Cloned Successfully"
+            }
+        }
+
+        stage("Push to Private Docker Hub Repo"){
+            steps{
+                withCredentials([usernamePassword(credentialsId:"DockerHubCreds",passwordVariable:"dockerPass",usernameVariable:"dockerUser")]){
+                sh "docker login -u ${env.dockerUser} -p ${env.dockerPass}"
+                sh "docker tag django-project:latest ${env.dockerUser}/django-project:latest"
+                sh "docker push ${env.dockerUser}/django-project:latest"
+                }
+                
+            }
+        }
+        stage("SonarQuebe Analysis"){
+            steps{
+                withSonarQubeEnv("Sonar"){
+                    sh "$SONAR_HOME/bin/sonar-scanner -Dsonar.projectName=django-app -Dsonar.projectKey=djangotodo"
+                }
+            }
+        }
+        stage("SonarQuebe Quality Check"){
+            steps{
+                timeout(time: 1, unit: "MINUTES"){
+                    waitForQualityGate abortPipeline: false
+                    
+                }
+            }
+        }
+
+        stage("OWASP"){
+            steps{
+                echo "Build Tested Successfully"
+                dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'OWASP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+
+            }
+        }
+        stage("Trivy"){
+            steps{
+                echo "Image Scanned Successfully"
+                sh "trivy image django-project "
+            }
+        }
+        stage("Build && Test"){
+            steps{
+                sh 'docker build -t django-project:latest .'
+                echo "Code Built Successfully"
+            }
+        }
+        stage("Deploy"){
+            steps{
+                sh "docker-compose up -d"
+                echo "App Deployed Successfully"
+            }
+        }
+    }
+}
